@@ -1,15 +1,87 @@
-FUNCTIONAL ESTIMATION OF MANIFOLD-VALUED DIFFUSION PROCESSES
-Jacob McErlean and Hau-Tieng Wu
+Functional Estimation of Manifold Valued Diffusion Processes
+Jacob McErlean and Hau Tieng Wu
 https://arxiv.org/pdf/2603.20945
 
-This repository accompanies the above paper and contains code for simulating and estimating diffusion processes on manifolds.
+This repository accompanies the above paper and provides a complete pipeline for
 
-The repository is organized into three main folders.
+- simulating diffusion processes on manifolds
+- estimating drift and diffusion from observed data
+- reproducing the numerical results in the manuscript
 
-The folder “src” contains the core implementation. The files SDE_sample_KB.py and SDE_sample_Sphere.py simulate SDEs on the Klein bottle and sphere, respectively. The file kernel_estimators.py implements the kernel functions and estimation procedures, and observed_ellipsoid.py provides helper routines for working with ellipsoid embeddings.
 
-The folder “experiments” contains scripts for generating data and running estimation experiments. The files KB_gen_traj.py and ellipsoid_gen_traj.py generate SDE trajectories on the Klein bottle and ellipsoids and perform down-sampling. The files KB_obs_est.py and ellipsoid_obs_est.py implement the main global estimation experiments on the Klein bottle and ellipsoids. The scripts observed_KB_experiment_3.py and observed_ellipsoid_experiment_3.py visualize invariant densities, while observed_ellipsoid_experiment_1.py provides an additional experiment evaluating normality of the estimators.
 
-The folder “figures and tables” contains the notebooks KB_Figures_and_Table.ipynb and Ellipsoid_Figures_and_Tables.ipynb, which generate all figures and tables in the manuscript. This folder also includes the necessary saved outputs used by the notebooks.
+------------------------------------------------------------
+Repository Structure
+------------------------------------------------------------
 
-This codebase provides a complete pipeline for simulating manifold-valued diffusion processes, estimating drift and diffusion functions from observed data, and reproducing the numerical results presented in the paper.
+
+SRC
+
+This folder contains the core implementation
+
+SDE_sample_KB.py
+Simulation of stochastic differential equations on the Klein bottle
+
+SDE_sample_Sphere.py
+Simulation of stochastic differential equations on the sphere
+
+kernel_estimators.py
+Kernel based estimators for drift and diffusion
+
+observed_ellipsoid.py
+Helper functions for ellipsoid embeddings and geometry
+
+
+------------------------------------------------------------
+
+
+EXPERIMENTS
+
+This folder contains scripts for generating data and running experiments
+
+KB_gen_traj.py
+Generate trajectories on the Klein bottle and perform down sampling
+
+ellipsoid_gen_traj.py
+Generate trajectories on ellipsoids via pushforward from the sphere
+
+KB_obs_est.py
+Main global estimation experiment on the Klein bottle
+
+ellipsoid_obs_est.py
+Main global estimation experiment on ellipsoids
+
+KB_invariant_density.py
+Visualization of invariant density on the Klein bottle
+
+ellipsoid_invariant_density.py
+Visualization of invariant density on ellipsoids
+
+ellipsoid_normality_simulations.py
+Experiment evaluating normality of the estimators
+
+
+------------------------------------------------------------
+
+
+FIGURES AND TABLES
+
+This folder contains notebooks for reproducing all figures and tables
+
+KB_Figures_and_Table.ipynb
+Ellipsoid_Figures_and_Tables.ipynb
+
+Saved outputs required for the figures are also included in this folder
+
+
+------------------------------------------------------------
+
+
+SUMMARY
+
+This codebase supports
+
+simulation of manifold valued diffusion processes
+estimation of drift and diffusion from observed trajectories
+evaluation of estimators through controlled experiments
+reproduction of all figures and tables from the manuscript

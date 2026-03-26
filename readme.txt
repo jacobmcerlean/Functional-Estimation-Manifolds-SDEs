@@ -4,9 +4,9 @@ https://arxiv.org/pdf/2603.20945
 
 This repository accompanies the above paper and provides a complete pipeline for
 
-- simulating diffusion processes on manifolds
-- estimating drift and diffusion from observed data
-- reproducing the numerical results in the manuscript
+- simulating diffusion processes on the Klein bottle and ellipsoids;
+- estimating drift and diffusion from observed data;
+- reproducing the numerical results in the manuscript.
 
 
 

@@ -1,5 +1,5 @@
 Functional Estimation of Manifold Valued Diffusion Processes
-Jacob McErlean and Hau Tieng Wu
+Jacob McErlean and Hau-Tieng Wu
 https://arxiv.org/pdf/2603.20945
 
 This repository accompanies the above paper and provides a complete pipeline for

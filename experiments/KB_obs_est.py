@@ -15,21 +15,27 @@ from SDE_sample_KB import (
 )
 
 def log_stage(msg: str) -> None:
+    # Timestamped logger for long-running experiment stages.
     print(f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}", flush=True)
 
 def _pick_latest(paths):
+    # From a list of candidate files, keep only existing files
+    # and return the most recently modified one.
     paths = [p for p in paths if os.path.isfile(p)]
     if not paths:
         return None
     return max(paths, key=lambda p: os.path.getmtime(p))
 
 def square_grid_points(grid_side: int, u_min: float, u_max: float, v_min: float, v_max: float):
+    # Build a regular grid on the parameter square [u_min,u_max) x [v_min,v_max).
+    # endpoint=False keeps the grid periodic-friendly on the square.
     xs = np.linspace(u_min, u_max, grid_side, endpoint=False)
     ys = np.linspace(v_min, v_max, grid_side, endpoint=False)
     X, Y = np.meshgrid(xs, ys, indexing="ij")
     return np.column_stack([X.ravel(), Y.ravel()])
 
 def load_index(traj_dir: str):
+    # Load the most recent trajectory index file produced in Stage A.
     idx_candidates = glob.glob(os.path.join(traj_dir, "index_sub*.npz"))
     if not idx_candidates:
         raise FileNotFoundError(f"Missing index_sub*.npz in traj_dir: {traj_dir}")
@@ -38,6 +44,9 @@ def load_index(traj_dir: str):
     return idx, idx_path
 
 def resolve_single_kb_traj_file(traj_dir: str, idx):
+    # Resolve the ambient Klein bottle trajectory file to use for Stage B.
+    # Prefer explicit filenames stored in the index; otherwise fall back to
+    # scanning the trajectory directory.
     if "traj_files" in idx.files:
         tf = idx["traj_files"]
         if isinstance(tf, np.ndarray) and tf.dtype == object:
@@ -47,7 +56,7 @@ def resolve_single_kb_traj_file(traj_dir: str, idx):
         else:
             tf = [str(tf)]
     else:
-        tf = []
+	tf = []
 
     cand = []
     for p in tf:
@@ -60,7 +69,7 @@ def resolve_single_kb_traj_file(traj_dir: str, idx):
             cand.append(p)
 
     if cand:
-        return cand[0]
+	return cand[0]
 
     fallbacks = sorted(glob.glob(os.path.join(traj_dir, "kb_traj_sim*_sub*.npy")))
     if fallbacks:
@@ -72,57 +81,76 @@ def resolve_single_kb_traj_file(traj_dir: str, idx):
     )
 
 def run_experiment(args):
+    # Load Stage A metadata and resolve the single ambient trajectory file
+    # used for this Stage B observed-estimation experiment.
     idx, idx_path = load_index(args.traj_dir)
     traj_path = resolve_single_kb_traj_file(args.traj_dir, idx)
 
+    # Prefer values recorded in the index; fall back to CLI defaults only if needed.
     N_full = int(np.asarray(idx["N"]).item()) if "N" in idx.files else int(args.N)
     Delta_full = float(np.asarray(idx["Delta"]).item()) if "Delta" in idx.files else float(args.Delta)
     T_full = float(np.asarray(idx["T"]).item()) if "T" in idx.files else (N_full * Delta_full)
 
+    # Subsampling factor inherited from Stage A.
     subsample = int(np.asarray(idx["subsample"]).item()) if "subsample" in idx.files else 1
     Delta_eff = Delta_full * subsample
 
+    # Load the embedded Klein bottle trajectory actually used in estimation.
     X_KB = np.load(traj_path, mmap_mode="r")
     if X_KB.ndim != 2 or X_KB.shape[1] != 4:
         raise ValueError(f"Expected KB ambient trajectory shape (N_eff+1,4). Got {X_KB.shape} from {traj_path}")
 
+    # Effective sample size refers to the down-sampled trajectory.
     N_eff = int(X_KB.shape[0] - 1)
     T_eff = Delta_eff * N_eff
 
     log_stage(
-        f"Stage B | traj_dir={args.traj_dir} | index={idx_path} | traj={traj_path} | "
+	f"Stage B | traj_dir={args.traj_dir} | index={idx_path} | traj={traj_path} | "
         f"N_full={N_full} Delta_full={Delta_full:g} subsample={subsample} | "
         f"N_eff={N_eff} Delta_eff={Delta_eff:g} | T={T_full:g} (T_eff={T_eff:g})"
     )
 
+    # Materialize the mmap'd trajectory in the desired dtype for downstream computation.
     X_eff = np.asarray(X_KB, dtype=(np.float32 if args.traj_dtype == "float32" else np.float64))
     log_stage(f"Stage B | embedded traj_eff in NPZ | shape={X_eff.shape} dtype={X_eff.dtype}")
 
+    # Base points are a regular grid in square coordinates, later embedded pointwise.
     base_points = square_grid_points(args.grid_side, args.u_min, args.u_max, args.v_min, args.v_max)
     num_basepoints = base_points.shape[0]
     num_neighbors = int(args.num_neighbors)
 
     log_stage(f"Starting experiment | basepoints={num_basepoints} | k={num_neighbors}")
 
+    # Precompute the true tangent projector and true ambient drift at each base point.
     P_true = np.zeros((num_basepoints, 4, 4))
     mu_true = np.zeros((num_basepoints, 4))
 
     for i in range(num_basepoints):
         u, v = base_points[i]
         Sigma = true_diffusion(u, v, args.a, args.r)
+
+        # The top two singular directions span the intrinsic tangent space in ambient coordinates.
         U, _, _ = np.linalg.svd(Sigma)
         U2 = U[:, :2]
         P_true[i] = U2 @ U2.T
+
+        # True ambient Itô drift at the base point.
         mu_true[i] = true_ambient_drift(u, v, args.a, args.r)
 
+    # Store projected drift fields in ambient coordinates:
+    # TT = true tangent projector applied to true drift
+    # TE = true tangent projector applied to estimated drift
+    # EE = estimated tangent projector applied to estimated drift
     mu_proj_TT = np.full((num_basepoints, 4), np.nan)
     mu_proj_TE = np.full((num_basepoints, 4), np.nan)
     mu_proj_EE = np.full((num_basepoints, 4), np.nan)
 
+    # The same three projected drift fields, but pulled back to square coordinates.
     mu_proj_TT_sq = np.full((num_basepoints, 2), np.nan)
     mu_proj_TE_sq = np.full((num_basepoints, 2), np.nan)
     mu_proj_EE_sq = np.full((num_basepoints, 2), np.nan)
 
+    # Additional outputs recorded for diagnostics and downstream plotting.
     occ_den = np.full(num_basepoints, np.nan)
     mu_hat_store = np.full((num_basepoints, 4), np.nan)
     sigma_hat_store = np.full((num_basepoints, 4, 4), np.nan)
@@ -131,10 +159,14 @@ def run_experiment(args):
     nan_counter = 0
     t0 = time.time()
 
+    # Main estimation loop over base points.
     for i in range(num_basepoints):
         u, v = base_points[i]
+
+        # Embed the current base point from square coordinates into ambient R^4.
         x0_KB = embed_klein_bottle(np.array([[u, v]]), args.a, args.r)[0]
 
+        # Euclidean kernel estimator for ambient drift and diffusion at x0_KB.
         mu_hat, Sigma_hat, density, h = euclidean_kernel_estimate_vec(
             x0_KB,
             X_eff,
@@ -142,7 +174,8 @@ def run_experiment(args):
             num_neighbors=num_neighbors
         )
 
-        if mu_hat is None or Sigma_hat is None:
+        # If the local estimator degenerates, record what is available and skip projections.
+	if mu_hat is None or Sigma_hat is None:
             occ_den[i] = float(density) if density is not None else np.nan
             h_store[i] = float(h) if h is not None else np.nan
             nan_counter += 1
@@ -151,11 +184,13 @@ def run_experiment(args):
             h_store[i] = float(h)
             mu_hat_store[i] = mu_hat
 
+            # Symmetrize the estimated diffusion and add a tiny ridge for SVD stability.
             Sigma_hat = 0.5 * (Sigma_hat + Sigma_hat.T)
             Sigma_hat += 1e-8 * np.eye(4)
             sigma_hat_store[i] = Sigma_hat
 
             try:
+                # Estimated tangent space from the top two singular directions.
                 U_hat, _, _ = np.linalg.svd(Sigma_hat)
             except np.linalg.LinAlgError:
                 nan_counter += 1
@@ -164,6 +199,10 @@ def run_experiment(args):
             U2_hat = U_hat[:, :2]
             P_est = U2_hat @ U2_hat.T
 
+            # Three projected drift variants:
+            # true drift projected onto true tangent space,
+            # estimated drift projected onto true tangent space,
+            # estimated drift projected onto estimated tangent space.
             mu_TT = P_true[i] @ mu_true[i]
             mu_TE = P_true[i] @ mu_hat
             mu_EE = P_est @ mu_hat
@@ -172,10 +211,12 @@ def run_experiment(args):
             mu_proj_TE[i] = mu_TE
             mu_proj_EE[i] = mu_EE
 
+            # Pull back ambient tangent vectors to square coordinates for intrinsic comparison.
             mu_proj_TT_sq[i] = pullback_to_square(mu_TT, u, v, args.a, args.r)
             mu_proj_TE_sq[i] = pullback_to_square(mu_TE, u, v, args.a, args.r)
             mu_proj_EE_sq[i] = pullback_to_square(mu_EE, u, v, args.a, args.r)
 
+        # Progress logging over base points.
         if (i + 1) % max(1, num_basepoints // 10) == 0 or (i + 1) == num_basepoints:
             elapsed = (time.time() - t0) / 60
             log_stage(f"Completed {i+1}/{num_basepoints} basepoints | elapsed={elapsed:.2f} min")
@@ -183,8 +224,11 @@ def run_experiment(args):
     total_minutes = (time.time() - t0) / 60
     log_stage(f"Stage B done | total={total_minutes:.2f} min | nan_skips={nan_counter}")
 
+    # Package results in a form convenient for saving and later figure generation.
+    # A leading singleton dimension is kept for compatibility with downstream code
+    # expecting a simulation axis.
     return {
-        "base_points": base_points,
+	"base_points": base_points,
         "u_min": args.u_min,
         "u_max": args.u_max,
         "v_min": args.v_min,
@@ -219,6 +263,8 @@ def run_experiment(args):
     }
 
 def main():
+    # Parse command-line arguments for trajectory input, base-point grid,
+    # kernel estimator settings, and output destination.
     parser = argparse.ArgumentParser()
 
     parser.add_argument("--traj_dir", type=str, required=True)
@@ -242,6 +288,7 @@ def main():
     args = parser.parse_args()
     os.makedirs(args.output_dir, exist_ok=True)
 
+    # Run Stage B and save results as a compressed NPZ.
     results = run_experiment(args)
 
     ts = time.strftime("%Y%m%d_%H%M%S")

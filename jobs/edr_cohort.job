@@ -1,0 +1,71 @@
+#!/bin/bash
+#$ -N edr_cohort
+#$ -cwd
+#$ -j y
+#$ -l h_rt=24:00:00
+#$ -l h_vmem=8G
+#$ -pe smp 4
+
+set -euo pipefail
+
+REPO_ROOT="${REPO_ROOT:-$PWD}"
+DATA_DIR="${TVGH_DATA_DIR:-${REPO_ROOT}/TVGH25Data}"
+OUTPUT_ROOT="${EDR_OUTPUT_ROOT:-outputs/edr_cohort}"
+
+cd "$REPO_ROOT"
+
+if [ ! -d "$DATA_DIR" ]; then
+    echo "Data directory not found: $DATA_DIR" >&2
+    echo "Set TVGH_DATA_DIR to the directory containing subject MAT files." >&2
+    exit 1
+fi
+
+mkdir -p "$OUTPUT_ROOT/logs"
+
+mapfile -t SUBJECTS < <(
+    find "$DATA_DIR" \
+        -maxdepth 1 \
+        -type f \
+        -name '*.mat' \
+        -printf '%f\n' \
+        | sort
+)
+
+if [ "${#SUBJECTS[@]}" -eq 0 ]; then
+    echo "No MAT files found in: $DATA_DIR" >&2
+    exit 1
+fi
+
+TASK_INDEX=$((SGE_TASK_ID - 1))
+
+if [ "$TASK_INDEX" -lt 0 ] || [ "$TASK_INDEX" -ge "${#SUBJECTS[@]}" ]; then
+    echo "SGE_TASK_ID=$SGE_TASK_ID is outside the available subject range." >&2
+    exit 1
+fi
+
+SUBJECT_FILE="${SUBJECTS[$TASK_INDEX]}"
+SUBJECT_ID="${SUBJECT_FILE%.mat}"
+SUMMARY="${OUTPUT_ROOT}/${SUBJECT_ID}/summary.csv"
+
+echo "========================================"
+echo "Job ID:       ${JOB_ID:-unknown}"
+echo "Task ID:      ${SGE_TASK_ID:-unknown}"
+echo "Subject:      $SUBJECT_ID"
+echo "Host:         $(hostname)"
+echo "Slots:        ${NSLOTS:-unknown}"
+echo "Data dir:     $DATA_DIR"
+echo "Output root:  $OUTPUT_ROOT"
+echo "========================================"
+
+if [ -f "$SUMMARY" ]; then
+    echo "Already complete: $SUBJECT_ID"
+    exit 0
+fi
+
+python -u -m scripts.run_edr_subject \
+    "${DATA_DIR}/${SUBJECT_FILE}" \
+    --simulation-seconds 300 \
+    --output-root "$OUTPUT_ROOT" \
+    > "${OUTPUT_ROOT}/logs/${SUBJECT_ID}.out" 2>&1
+
+echo "Finished subject: $SUBJECT_ID"

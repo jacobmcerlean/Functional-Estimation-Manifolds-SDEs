@@ -1,0 +1,6 @@
+__pycache__/
+*.pyc
+outputs/
+TVGH25Data/
+archive/
+*.o[0-9]*
